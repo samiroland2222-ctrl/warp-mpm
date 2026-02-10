@@ -1,0 +1,12 @@
+[project]
+name = "warp-mpm"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.11"
+dependencies = [
+    "h5py>=3.15.1",
+    "numpy>=2.4.2",
+    "open3d>=0.19.0",
+    "torch>=2.10.0",
+    "warp-lang>=1.11.1",
+]

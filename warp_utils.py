@@ -281,7 +281,6 @@ def torch2warp_vec3(t, copy=False, dtype=warp.types.float32, dvc="cuda:0"):
         dtype=wp.vec3,
         shape=t.shape[0],
         copy=False,
-        owner=False,
         requires_grad=t.requires_grad,
         # device=t.device.type)
         device=dvc,

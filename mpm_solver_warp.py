@@ -9,10 +9,11 @@ from mpm_utils import *
 
 class MPM_Simulator_WARP:
     def __init__(self, n_particles, n_grid=100, grid_lim=1.0, device="cuda:0"):
-        self.initialize(n_particles, n_grid, grid_lim, device=device)
+        self.device = device
+        self.initialize(n_particles, n_grid, grid_lim)
         self.time_profile = {}
 
-    def initialize(self, n_particles, n_grid=100, grid_lim=1.0, device="cuda:0"):
+    def initialize(self, n_particles, n_grid=100, grid_lim=1.0):
         self.n_particles = n_particles
 
         self.mpm_model = MPMModelStruct()
@@ -31,6 +32,7 @@ class MPM_Simulator_WARP:
             self.mpm_model.n_grid / self.mpm_model.grid_lim
         )
 
+        device = self.device
         self.mpm_model.E = wp.zeros(shape=n_particles, dtype=float, device=device)
         self.mpm_model.nu = wp.zeros(shape=n_particles, dtype=float, device=device)
         self.mpm_model.mu = wp.zeros(shape=n_particles, dtype=float, device=device)
@@ -142,7 +144,7 @@ class MPM_Simulator_WARP:
 
     # the h5 file should store particle initial position and volume.
     def load_from_sampling(
-        self, sampling_h5, n_grid=100, grid_lim=1.0, device="cuda:0"
+        self, sampling_h5, n_grid=100, grid_lim=1.0
     ):
         if not os.path.exists(sampling_h5):
             print("h5 file cannot be found at ", os.getcwd() + sampling_h5)
@@ -155,13 +157,14 @@ class MPM_Simulator_WARP:
 
         self.dim, self.n_particles = x.shape[1], x.shape[0]
 
-        self.initialize(self.n_particles, n_grid, grid_lim, device=device)
+        self.initialize(self.n_particles, n_grid, grid_lim)
 
         print(
             "Sampling particles are loaded from h5 file. Simulator is re-initialized for the correct n_particles"
         )
         particle_volume = np.squeeze(particle_volume, 0)
 
+        device = self.device
         self.mpm_state.particle_x = wp.from_numpy(
             x, dtype=wp.vec3, device=device
         )  # initialize warp array from np
@@ -199,14 +202,14 @@ class MPM_Simulator_WARP:
         tensor_cov = None,
         n_grid=100,
         grid_lim=1.0,
-        device="cuda:0",
     ):
         self.dim, self.n_particles = tensor_x.shape[1], tensor_x.shape[0]
         assert tensor_x.shape[0] == tensor_volume.shape[0]
         # assert tensor_x.shape[0] == tensor_cov.reshape(-1, 6).shape[0]
-        self.initialize(self.n_particles, n_grid, grid_lim, device=device)
+        self.initialize(self.n_particles, n_grid, grid_lim)
 
-        self.import_particle_x_from_torch(tensor_x, device)
+        self.import_particle_x_from_torch(tensor_x)
+        device = self.device
         self.mpm_state.particle_vol = wp.from_numpy(
             tensor_volume.detach().clone().cpu().numpy(), dtype=float, device=device
         )
@@ -242,10 +245,10 @@ class MPM_Simulator_WARP:
         print("Total particles: ", self.n_particles)
 
     # must give density. mass will be updated as density * volume
-    def set_parameters(self, device="cuda:0", **kwargs):
+    def set_parameters(self, **kwargs):
         self.set_parameters_dict(device, kwargs)
 
-    def set_parameters_dict(self, kwargs={}, device="cuda:0"):
+    def set_parameters_dict(self, kwargs={}):
         if "material" in kwargs:
             if kwargs["material"] == "jelly":
                 self.mpm_model.material = 0
@@ -277,6 +280,7 @@ class MPM_Simulator_WARP:
         ) = self.mpm_model.grid_lim / self.mpm_model.n_grid, float(
             self.mpm_model.n_grid / self.mpm_model.grid_lim
         )
+        device = self.device
         self.mpm_state.grid_m = wp.zeros(
             shape=(self.mpm_model.n_grid, self.mpm_model.n_grid, self.mpm_model.n_grid),
             dtype=float,
@@ -388,19 +392,21 @@ class MPM_Simulator_WARP:
             )
 
 
-    def finalize_mu_lam_bulk(self, device = "cuda:0"):
+    def finalize_mu_lam_bulk(self):
+        device = self.device
         wp.launch(kernel = compute_mu_lam_from_E_nu, dim = self.n_particles, inputs = [self.mpm_state, self.mpm_model], device=device)
         wp.launch(kernel=compute_bulk,
                   dim=self.n_particles,
                   inputs=[self.mpm_state, self.mpm_model],
                   device=device
                   )
-    def p2g2p(self, step, dt, device="cuda:0"):
+    def p2g2p(self, step, dt):
         grid_size = (
             self.mpm_model.grid_dim_x,
             self.mpm_model.grid_dim_y,
             self.mpm_model.grid_dim_z,
         )
+        device = self.device
         wp.launch(
             kernel=zero_grid,
             dim=(grid_size),
@@ -514,9 +520,9 @@ class MPM_Simulator_WARP:
         self.time = self.time + dt
 
     # set particle densities to all_particle_densities, 
-    def reset_densities_and_update_masses(self, all_particle_densities, device = "cuda:0"):
+    def reset_densities_and_update_masses(self, all_particle_densities):
         all_particle_densities = all_particle_densities.clone().detach()
-        self.mpm_state.particle_density = torch2warp_float(all_particle_densities, dvc=device)
+        self.mpm_state.particle_density = torch2warp_float(all_particle_densities, dvc=self.device)
         wp.launch(
                 kernel=get_float_array_product,
                 dim=self.n_particles,
@@ -525,15 +531,15 @@ class MPM_Simulator_WARP:
                     self.mpm_state.particle_vol,
                     self.mpm_state.particle_mass,
                 ],
-                device=device,
+                device=self.device,
             )
 
     # clone = True makes a copy, not necessarily needed
-    def import_particle_x_from_torch(self, tensor_x, clone=True, device="cuda:0"):
+    def import_particle_x_from_torch(self, tensor_x, clone=True):
         if tensor_x is not None:
             if clone:
                 tensor_x = tensor_x.clone().detach()
-            self.mpm_state.particle_x = torch2warp_vec3(tensor_x, dvc=device)
+            self.mpm_state.particle_x = torch2warp_vec3(tensor_x, dvc=self.device)
 
     # clone = True makes a copy, not necessarily needed
     def import_particle_v_from_torch(self, tensor_v, clone=True, device="cuda:0"):
