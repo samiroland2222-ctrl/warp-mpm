@@ -1,5 +1,6 @@
 import warp as wp
 from warp_utils import *
+from mpm_materials import get_stress_volumetric, get_stress_shell
 import numpy as np
 import math
 

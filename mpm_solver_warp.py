@@ -59,6 +59,8 @@ class MPM_Simulator_WARP:
 
         self.mpm_model.grid_v_damping_scale = 1.1  # globally applied
 
+        self.mpm_model.anisotropy_factor = 2.0  # Shell anisotropy strength (default)
+
         self.mpm_state = MPMStateStruct()
 
         self.mpm_state.particle_x = wp.empty(
@@ -112,6 +114,17 @@ class MPM_Simulator_WARP:
         self.mpm_state.particle_selection = wp.zeros(
             shape=n_particles, dtype=int, device=device
         )
+
+        # Shell/Codimensional support
+        self.mpm_state.particle_type = wp.zeros(
+            shape=n_particles, dtype=int, device=device
+        )  # 0 = volumetric, 1 = shell
+        self.mpm_state.particle_fiber = wp.zeros(
+            shape=n_particles, dtype=wp.vec3, device=device
+        )  # fiber direction for shells
+        self.mpm_state.particle_normal = wp.zeros(
+            shape=n_particles, dtype=wp.vec3, device=device
+        )  # normal direction for shells
 
         self.mpm_state.grid_m = wp.zeros(
             shape=(self.mpm_model.n_grid, self.mpm_model.n_grid, self.mpm_model.n_grid),

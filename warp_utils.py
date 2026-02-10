@@ -38,6 +38,9 @@ class MPMModelStruct:
     ####### for PhysGaussian: covariance
     update_cov_with_F: int
 
+    ####### for Shell/Codimensional materials
+    anisotropy_factor: float  # Anisotropy strength for shell materials (>1.0 = stiffer along fibers)
+
 
 @wp.struct
 class MPMStateStruct:
@@ -60,6 +63,11 @@ class MPMStateStruct:
     particle_Jp: wp.array(dtype=float)
 
     particle_selection: wp.array(dtype=int) # only particle_selection[p] = 0 will be simulated
+
+    # Shell/Codimensional support
+    particle_type: wp.array(dtype=int)  # 0 = volumetric (fluid/solid), 1 = shell (cloth/membrane)
+    particle_fiber: wp.array(dtype=wp.vec3)  # fiber/anisotropy direction for shells
+    particle_normal: wp.array(dtype=wp.vec3)  # normal direction for shells
 
     # grid
     grid_m: wp.array(dtype=float, ndim=3)
