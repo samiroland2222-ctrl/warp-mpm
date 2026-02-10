@@ -7,7 +7,6 @@ dependencies = [
     "h5py>=3.15.1",
     "matplotlib>=3.5.0",
     "numpy>=2.4.2",
-    "open3d>=0.19.0",
     "torch>=2.10.0",
     "viser>=0.2.0",
     "warp-lang>=1.11.1",
