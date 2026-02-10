@@ -56,6 +56,7 @@ def run_simulation():
         viewer.update_data(mpm_solver.mpm_state.particle_x.numpy(),
                            mpm_solver.mpm_state.particle_v.numpy(),
                            mpm_solver.mpm_state.particle_F.numpy())
+        viewer.update()
 
     # extract the position, make some changes, load it back
     position = mpm_solver.export_particle_x_to_torch()
@@ -63,12 +64,13 @@ def run_simulation():
     position[:,0] = position[:,0] + 0.1
     mpm_solver.import_particle_x_from_torch(position)
     # keep running sim
-    for k in range(50,100):
+    while True:
         mpm_solver.p2g2p(k, 0.002)
-        save_data_at_frame(mpm_solver, directory_to_save, k, save_to_ply=True, save_to_h5=False)
+        #save_data_at_frame(mpm_solver, directory_to_save, k, save_to_ply=True, save_to_h5=False)
         viewer.update_data(mpm_solver.mpm_state.particle_x.numpy(),
                            mpm_solver.mpm_state.particle_v.numpy(),
                            mpm_solver.mpm_state.particle_F.numpy())
+        viewer.update()
 
 
 simulation_thread = threading.Thread(target=run_simulation)

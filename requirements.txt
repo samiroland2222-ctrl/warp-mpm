@@ -2,3 +2,6 @@ warp-lang
 h5py
 torch
 open3d
+viser
+matplotlib
+numpy
