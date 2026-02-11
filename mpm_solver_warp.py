@@ -1193,6 +1193,7 @@ class MPM_Simulator_WARP:
 
         velocity_modifier_params.mask = wp.zeros(
             shape=self.n_particles, dtype=int, device=device)
+        # pinned_x is unused for rotation (no post-G2P pinning), initialized to satisfy struct
         velocity_modifier_params.pinned_x = wp.zeros(
             shape=self.n_particles, dtype=wp.vec3, device=device)
         

@@ -231,9 +231,9 @@ def test_pinned_particles_stay_fixed():
             abs(pos[2] - center_point[2]) < pin_size[2]):
             dist = np.linalg.norm(final_positions[i] - pos)
             assert dist < 1e-6, f"Pinned particle {i} moved by {dist}"
-            # F should remain identity for pinned particles
+            # F should remain identity for pinned particles (post-G2P resets F_trial = F)
             F_err = np.linalg.norm(final_F[i] - np.eye(3))
-            assert F_err < 1e-3, f"Pinned particle {i} has F deviation {F_err}"
+            assert F_err < 1e-6, f"Pinned particle {i} has F deviation {F_err}"
 
     # Check non-pinned particles have moved (cloth drapes under gravity)
     z_values = final_positions[:, 2]
