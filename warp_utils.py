@@ -110,7 +110,7 @@ class Dirichlet_collider:
     horizontal_axis_1: wp.vec3
     horizontal_axis_2: wp.vec3
     half_height_and_radius: wp.vec2
-    
+
 
 
 @wp.struct

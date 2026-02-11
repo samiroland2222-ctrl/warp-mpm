@@ -145,7 +145,7 @@ class MPM_Simulator_WARP:
         self.time = 0.0
 
         self.grid_postprocess = []
-        self.collider_params = []
+        self.collider_params: list[Dirichlet_collider] = []
         self.modify_bc = []
 
         self.tailored_struct_for_bc = MPMtailoredStruct()
@@ -413,6 +413,167 @@ class MPM_Simulator_WARP:
                   inputs=[self.mpm_state, self.mpm_model],
                   device=device
                   )
+
+    def validate_initial_state(self):
+        """
+        Validate that the simulation state is properly initialized before running.
+
+        Checks:
+        - particle_F_trial is set (not all zeros)
+        - particle_x has valid positions
+        - particle_vol has valid volumes
+        - particle_mass has valid masses
+
+        Raises:
+            RuntimeError: If any validation check fails
+
+        Example:
+            solver = MPM_Simulator_WARP(1000)
+            solver.load_from_sampling("data.h5")
+            solver.set_parameters_dict({'E': 1e6, 'nu': 0.3, 'density': 1000.0})
+            solver.finalize_mu_lam_bulk()
+            solver.validate_initial_state()  # Check before running
+            solver.p2g2p(0, 0.001)
+        """
+        # Check particle_F_trial is initialized
+        F_trial = self.mpm_state.particle_F_trial.numpy()
+
+        # Check if all F_trial matrices are zero (uninitialized)
+        if np.all(F_trial == 0.0):
+            raise RuntimeError(
+                "particle_F_trial is all zeros! Must call load_from_sampling(), "
+                "load_initial_data_from_torch(), or initialize_shell_particles() "
+                "to properly initialize deformation gradient."
+            )
+
+        # Check if F_trial has reasonable values (identity matrices have trace=3)
+        traces = np.trace(F_trial, axis1=1, axis2=2)
+        if np.any(traces < 0.1):
+            print("Warning: Some particle_F_trial matrices have very small traces. "
+                  "This may indicate improper initialization.")
+
+        # Check particle positions are set
+        positions = self.mpm_state.particle_x.numpy()
+        if np.all(positions == 0.0):
+            raise RuntimeError(
+                "particle_x is all zeros! Must set particle positions before simulation."
+            )
+
+        # Check positions are within grid bounds
+        min_pos = positions.min()
+        max_pos = positions.max()
+        if min_pos < 0.0 or max_pos > self.mpm_model.grid_lim:
+            print(f"Warning: Some particles are outside grid bounds [0, {self.mpm_model.grid_lim}]. "
+                  f"Position range: [{min_pos:.3f}, {max_pos:.3f}]")
+
+        # Check particle volumes are positive
+        volumes = self.mpm_state.particle_vol.numpy()
+        if np.any(volumes <= 0.0):
+            raise RuntimeError(
+                "Some particle_vol values are zero or negative! "
+                "Must set positive volumes before simulation."
+            )
+
+        # Check particle masses are positive
+        masses = self.mpm_state.particle_mass.numpy()
+        if np.any(masses <= 0.0):
+            raise RuntimeError(
+                "Some particle_mass values are zero or negative! "
+                "Must call set_parameters_dict with 'density' parameter "
+                "or manually set masses before simulation."
+            )
+
+        print(f"✓ Initial state validation passed:")
+        print(f"  - {self.n_particles} particles initialized")
+        print(f"  - Position range: [{min_pos:.3f}, {max_pos:.3f}]")
+        print(f"  - Volume range: [{volumes.min():.2e}, {volumes.max():.2e}]")
+        print(f"  - Mass range: [{masses.min():.2e}, {masses.max():.2e}]")
+        print(f"  - F_trial trace range: [{traces.min():.3f}, {traces.max():.3f}]")
+
+    def initialize_shell_particles(self, particle_indices, fiber_directions=None, normal_directions=None):
+        """
+        Initialize particles as shell/membrane particles.
+
+        This method properly initializes:
+        - particle_v to zero
+        - particle_F_trial to identity matrix
+        - particle_type to 1 (shell)
+        - particle_fiber to specified or default directions
+        - particle_normal to specified or default directions
+
+        Args:
+            particle_indices: List or array of particle indices to mark as shells
+            fiber_directions: Optional array of fiber directions (n_shell_particles, 3).
+                            If None, defaults to x-axis [1,0,0]
+            normal_directions: Optional array of normal directions (n_shell_particles, 3).
+                             If None, defaults to z-axis [0,0,1]
+
+        Example:
+            # Mark particles 100-200 as shell with default fiber/normal
+            solver.initialize_shell_particles(range(100, 200))
+
+            # With custom fiber directions aligned with geometry
+            fibers = compute_fiber_directions_from_mesh(mesh)
+            normals = compute_normals_from_mesh(mesh)
+            solver.initialize_shell_particles(shell_indices, fibers, normals)
+        """
+        device = self.device
+        particle_indices = np.array(particle_indices, dtype=int)
+        n_shell = len(particle_indices)
+
+        # Initialize particle_v to zero using wp.launch
+        wp.launch(
+            kernel=set_vec3_to_zero,
+            dim=self.n_particles,
+            inputs=[self.mpm_state.particle_v],
+            device=device,
+        )
+
+        # Initialize particle_F_trial to identity using wp.launch
+        wp.launch(
+            kernel=set_mat33_to_identity,
+            dim=self.n_particles,
+            inputs=[self.mpm_state.particle_F_trial],
+            device=device,
+        )
+
+        # Get current particle type array
+        particle_type = self.mpm_state.particle_type.numpy()
+        particle_type[particle_indices] = 1  # Mark as shell
+        self.mpm_state.particle_type = wp.array(particle_type, dtype=int, device=device)
+
+        # Set fiber directions
+        particle_fiber = self.mpm_state.particle_fiber.numpy()
+        if fiber_directions is None:
+            # Default: fibers along x-axis
+            particle_fiber[particle_indices] = [1.0, 0.0, 0.0]
+        else:
+            fiber_directions = np.array(fiber_directions)
+            assert fiber_directions.shape == (n_shell, 3), \
+                f"fiber_directions shape {fiber_directions.shape} doesn't match (n_shell={n_shell}, 3)"
+            # Normalize fiber directions
+            norms = np.linalg.norm(fiber_directions, axis=1, keepdims=True)
+            fiber_directions = fiber_directions / (norms + 1e-10)
+            particle_fiber[particle_indices] = fiber_directions
+        self.mpm_state.particle_fiber = wp.array(particle_fiber, dtype=wp.vec3, device=device)
+
+        # Set normal directions
+        particle_normal = self.mpm_state.particle_normal.numpy()
+        if normal_directions is None:
+            # Default: normals along z-axis
+            particle_normal[particle_indices] = [0.0, 0.0, 1.0]
+        else:
+            normal_directions = np.array(normal_directions)
+            assert normal_directions.shape == (n_shell, 3), \
+                f"normal_directions shape {normal_directions.shape} doesn't match (n_shell={n_shell}, 3)"
+            # Normalize normal directions
+            norms = np.linalg.norm(normal_directions, axis=1, keepdims=True)
+            normal_directions = normal_directions / (norms + 1e-10)
+            particle_normal[particle_indices] = normal_directions
+        self.mpm_state.particle_normal = wp.array(particle_normal, dtype=wp.vec3, device=device)
+
+        print(f"Initialized {n_shell} particles as shell/membrane particles")
+
     def p2g2p(self, step, dt):
         grid_size = (
             self.mpm_model.grid_dim_x,
@@ -1050,5 +1211,9 @@ class MPM_Simulator_WARP:
 
 
         
+
+
+
+
 
 

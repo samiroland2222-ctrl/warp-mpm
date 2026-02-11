@@ -479,35 +479,37 @@ def compute_stress_from_F_trial(
             state.particle_F[p] = state.particle_F_trial[p]
 
         # also compute stress here
-        J = wp.determinant(state.particle_F[p])
-        U = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-        V = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-        sig = wp.vec3(0.0)
+        # Check if this is a shell (codimensional) particle or volumetric
         stress = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-        wp.svd3(state.particle_F[p], U, sig, V)
-        if model.material == 0 or model.material == 5:
-            stress = kirchoff_stress_FCR(
-                state.particle_F[p], U, V, J, model.mu[p], model.lam[p]
+
+        if state.particle_type[p] == 1:
+            # Shell material - use plane stress model
+            stress = get_stress_shell(
+                state.particle_F[p],
+                state.particle_fiber[p],
+                state.particle_normal[p],
+                model.mu[p],
+                model.lam[p],
+                model.anisotropy_factor
             )
-        if model.material == 1:
-            stress = kirchoff_stress_StVK(
-                state.particle_F[p], U, V, sig, model.mu[p], model.lam[p]
-            )
-        if model.material == 2:
-            stress = kirchoff_stress_drucker_prager(
-                state.particle_F[p], U, V, sig, model.mu[p], model.lam[p]
-            )
-        if model.material == 3:
-            # temporarily use stvk, subject to change
-            stress = kirchoff_stress_StVK(
-                state.particle_F[p], U, V, sig, model.mu[p], model.lam[p]
-            )
-        if model.material == 6: # fluid
-            stress = kirchoff_stress_water(
-                J, model.bulk[p]
+        else:
+            # Volumetric material - use 3D stress model
+            J = wp.determinant(state.particle_F[p])
+            U = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            V = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            sig = wp.vec3(0.0)
+            wp.svd3(state.particle_F[p], U, sig, V)
+
+            stress = get_stress_volumetric(
+                state.particle_F[p],
+                U, V, sig, J,
+                model.mu[p],
+                model.lam[p],
+                model.bulk[p],
+                model.material
             )
 
-        stress = (stress + wp.transpose(stress)) / 2.0  # enfore symmetry
+        stress = (stress + wp.transpose(stress)) / 2.0  # enforce symmetry
         state.particle_stress[p] = stress
 
 

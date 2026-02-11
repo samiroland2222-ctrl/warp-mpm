@@ -6,6 +6,9 @@ import numpy as np
 import viser
 from matplotlib import pyplot as plt
 
+from warp_utils import Dirichlet_collider
+from scipy.spatial.transform import Rotation
+
 
 class MPM_Viewer:
     def __init__(self):
@@ -14,10 +17,8 @@ class MPM_Viewer:
         self.particle_stress = None
         self.target_fps = 60
         self.message_queue = queue.Queue() # a thread-safe queue to receive data from the main thread
-        self.server = None
         self.point_cloud_handle = None
 
-    def launch_window(self, blocking=True):
         # check that we're on the main thread
         assert(threading.current_thread() == threading.main_thread())
         # launch viser server and start the rendering loop
@@ -31,6 +32,10 @@ class MPM_Viewer:
             colors=np.array([[0, 0, 255]]),
             point_size=0.01,
         )
+
+
+
+    def launch_window(self, blocking=True):
 
         if not blocking:
             return
@@ -85,6 +90,36 @@ class MPM_Viewer:
             self.point_cloud_handle.points = self.particle_pos
             self.point_cloud_handle.colors = colors_rgb
 
+
     #def update_camera(self):
     #    # use a game-like input paradigm (wasd/arrow keys to move, mouse to look around) to update the camera position and orientation
+    def add_colliders(self, collider_params: list[Dirichlet_collider]):
+        for i, c in enumerate(collider_params):
+            if np.array(c.normal).sum() == 0:
+                # skip colliders with zero normal (not properly initialized)
+                continue
+            position = np.array(c.point)
+            wxyz = _normal_to_wxyz(np.array(c.normal))
 
+            self.server.scene.add_grid(
+                name=f'collider_{i}',
+                width=10,
+                height=10,
+                plane='xy', # normal in Z
+                cell_color=(192, 192, 64),
+                position=position,
+                wxyz=wxyz
+            )
+
+
+def _normal_to_wxyz(normal: np.ndarray):
+    # Ensure normal is a unit vector
+    normal = normal / np.linalg.norm(normal)
+    # Default grid normal is [0, 0, 1]
+    default = np.array([0, 0, 1])
+    # Compute rotation
+    rot = Rotation.align_vectors([normal], [default])[0]
+    # Return as wxyz (scalar first)
+    wxyz = rot.as_quat()  # returns [x, y, z, w]
+    wxyz = np.roll(wxyz, 1)  # reorder to [w, x, y, z]
+    return wxyz
