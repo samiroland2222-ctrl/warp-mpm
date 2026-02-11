@@ -186,20 +186,34 @@ def get_stress_shell(
     tangent2 = wp.normalize(wp.cross(particle_normal, tangent1))
 
     # Project F onto the 2D shell space
-    # Extract 2x2 deformation in tangent space
-    F_t1 = F * tangent1
-    F_t2 = F * tangent2
+    # The key insight: F maps material vectors to spatial vectors
+    # For shell, we want to know how material tangent vectors deform
+    # F_tangent = [F*t1, F*t2] gives us the deformed tangent vectors
+    # Then we measure their length/angle changes in the tangent plane
 
+    # Get deformed tangent vectors
+    F_t1 = F * tangent1  # Where tangent1 goes after deformation
+    F_t2 = F * tangent2  # Where tangent2 goes after deformation
+
+    # Extract 2x2 in-plane deformation gradient
+    # F_shell[i,j] = how much of deformed tangent_j is along tangent_i direction
     F11 = wp.dot(F_t1, tangent1)
-    F12 = wp.dot(F_t1, tangent2)
-    F21 = wp.dot(F_t2, tangent1)
+    F12 = wp.dot(F_t2, tangent1)
+    F21 = wp.dot(F_t1, tangent2)
     F22 = wp.dot(F_t2, tangent2)
 
-    # 2D Green strain: E = 0.5 * (F^T F - I)
-    # For small strains, this is approximately the engineering strain
-    E11 = 0.5 * (F11 * F11 + F21 * F21 - 1.0)
-    E22 = 0.5 * (F12 * F12 + F22 * F22 - 1.0)
-    E12 = 0.5 * (F11 * F12 + F21 * F22)
+    # Right Cauchy-Green deformation tensor in shell coordinates: C = F^T * F
+    # C11 = F11^2 + F21^2
+    # C22 = F12^2 + F22^2
+    # C12 = F11*F12 + F21*F22
+    C11 = F11 * F11 + F21 * F21
+    C22 = F12 * F12 + F22 * F22
+    C12 = F11 * F12 + F21 * F22
+
+    # Green strain: E = 0.5 * (C - I)
+    E11 = 0.5 * (C11 - 1.0)
+    E22 = 0.5 * (C22 - 1.0)
+    E12 = 0.5 * C12
 
     # Plane stress constitutive relation (isotropic base)
     # sigma = (E / (1 - nu^2)) * [ [1, nu, 0], [nu, 1, 0], [0, 0, (1-nu)/2] ] * epsilon
@@ -218,19 +232,18 @@ def get_stress_shell(
     S22 = S22_base
     S12 = S12_base
 
-    # Convert back to 3D Kirchhoff stress (embedded in 3D space)
-    # stress = S11 * (t1 ⊗ t1) + S22 * (t2 ⊗ t2) + S12 * (t1 ⊗ t2 + t2 ⊗ t1)
-    stress = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    # Convert 2D stress to 3D (in material configuration)
+    # S_material = S11 * (t1 ⊗ t1) + S22 * (t2 ⊗ t2) + S12 * (t1 ⊗ t2 + t2 ⊗ t1)
+    S_material = wp.mat33(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    S_material = S_material + wp.outer(tangent1, tangent1) * S11
+    S_material = S_material + wp.outer(tangent2, tangent2) * S22
+    S_material = S_material + wp.outer(tangent1, tangent2) * S12
+    S_material = S_material + wp.outer(tangent2, tangent1) * S12
 
-    # Add S11 * (tangent1 ⊗ tangent1)
-    stress = stress + wp.outer(tangent1, tangent1) * S11
-
-    # Add S22 * (tangent2 ⊗ tangent2)
-    stress = stress + wp.outer(tangent2, tangent2) * S22
-
-    # Add S12 * (tangent1 ⊗ tangent2 + tangent2 ⊗ tangent1)
-    stress = stress + wp.outer(tangent1, tangent2) * S12
-    stress = stress + wp.outer(tangent2, tangent1) * S12
+    # Push forward to spatial configuration: Kirchhoff stress = F * S * F^T
+    # This transformation is essential for the MPM solver to correctly apply forces
+    stress = F * S_material * wp.transpose(F)
 
     return stress
+
 

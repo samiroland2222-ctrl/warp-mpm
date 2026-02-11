@@ -537,6 +537,14 @@ class MPM_Simulator_WARP:
             device=device,
         )
 
+        # Initialize particle_F to identity as well
+        wp.launch(
+            kernel=set_mat33_to_identity,
+            dim=self.n_particles,
+            inputs=[self.mpm_state.particle_F],
+            device=device,
+        )
+
         # Get current particle type array
         particle_type = self.mpm_state.particle_type.numpy()
         particle_type[particle_indices] = 1  # Mark as shell
@@ -716,14 +724,16 @@ class MPM_Simulator_WARP:
             self.mpm_state.particle_x = torch2warp_vec3(tensor_x, dvc=self.device)
 
     # clone = True makes a copy, not necessarily needed
-    def import_particle_v_from_torch(self, tensor_v, clone=True, device="cuda:0"):
+    def import_particle_v_from_torch(self, tensor_v, clone=True):
+        device = self.device
         if tensor_v is not None:
             if clone:
                 tensor_v = tensor_v.clone().detach()
             self.mpm_state.particle_v = torch2warp_vec3(tensor_v, dvc=device)
 
     # clone = True makes a copy, not necessarily needed
-    def import_particle_F_from_torch(self, tensor_F, clone=True, device="cuda:0"):
+    def import_particle_F_from_torch(self, tensor_F, clone=True):
+        device = self.device
         if tensor_F is not None:
             if clone:
                 tensor_F = tensor_F.clone().detach()
@@ -731,7 +741,8 @@ class MPM_Simulator_WARP:
             self.mpm_state.particle_F = torch2warp_mat33(tensor_F, dvc=device)
 
     # clone = True makes a copy, not necessarily needed
-    def import_particle_C_from_torch(self, tensor_C, clone=True, device="cuda:0"):
+    def import_particle_C_from_torch(self, tensor_C, clone=True):
+        device = self.device
         if tensor_C is not None:
             if clone:
                 tensor_C = tensor_C.clone().detach()

@@ -44,7 +44,7 @@ def main(steps: int=100, viewer: MPM_Viewer = None):
 
     # Simulation parameters
     n_grid = 64
-    grid_lim = 3.0
+    grid_lim = 1.5
     dt = 0.001
     n_steps = 50
     device = "cpu"  # Use CPU for this example
@@ -52,11 +52,12 @@ def main(steps: int=100, viewer: MPM_Viewer = None):
     print(f"\nDevice: {device}")
 
     # Create membrane geometry
+    # Adjust spacing to match grid: dx = 1.5/128 ≈ 0.0117, use spacing ≈ 0.01
     membrane_spacing = 0.01  # 1cm spacing
     positions, fibers, normals = create_rectangular_membrane(
-        center=[0.5, 0.5, 2.9],
-        width=0.3,
-        height=0.3,
+        center=[0.75, 0.75, 1.3],  # Center in smaller domain
+        width=0.6,  # Larger membrane
+        height=0.6,
         particle_spacing=membrane_spacing
     )
 
@@ -102,7 +103,7 @@ def main(steps: int=100, viewer: MPM_Viewer = None):
 
     # Add ground plane
     solver.add_surface_collider(
-        point=(0.0, 0.0, 0.2),
+        point=(0.0, 0.0, 0.1),
         normal=(0.0, 0.0, 1.0),
         surface='slip',
         friction=0.1
@@ -111,6 +112,19 @@ def main(steps: int=100, viewer: MPM_Viewer = None):
     # Add bounding box
     solver.add_bounding_box()
 
+    # Pin the center particle using proper velocity enforcement
+    # This creates constraint forces that propagate through the grid
+    center_point = [0.75, 0.75, 1.3]
+    pin_size = [0.015, 0.015, 0.015]  # Small region around center
+    solver.enforce_particle_velocity_translation(
+        point=center_point,
+        size=pin_size,
+        velocity=[0.0, 0.0, 0.0],
+        start_time=0.0,
+        end_time=1000.0,
+        device=device
+    )
+
     print(f"\nSimulation setup complete!")
     print(f"  Grid: {n_grid}³")
     print(f"  Particles: {n_particles}")
@@ -118,6 +132,7 @@ def main(steps: int=100, viewer: MPM_Viewer = None):
     print(f"  Anisotropy: {solver.mpm_model.anisotropy_factor}x")
     print(f"  Time step: {dt}s")
     print(f"  Steps: {n_steps}")
+    print(f"  Pinned region: {pin_size} around {center_point}")
 
     if viewer:
         viewer.add_colliders(solver.collider_params)
@@ -129,10 +144,6 @@ def main(steps: int=100, viewer: MPM_Viewer = None):
         solver.p2g2p(step=step, dt=dt)
         step += 1
 
-        # pin the center of the membrane to simulate a hanging cloth
-        position = solver.export_particle_x_to_torch()
-        position[n_particles // 2] = torch.tensor([0.5, 0.5, 2.9])  # Pin center particle
-        solver.import_particle_x_from_torch(position)
 
         if viewer:
             viewer.update_data(solver.mpm_state.particle_x.numpy(),
