@@ -182,6 +182,7 @@ class ParticleVelocityModifier:
     velocity: wp.vec3
 
     mask: wp.array(dtype=int)
+    pinned_x: wp.array(dtype=wp.vec3)
 
 
 

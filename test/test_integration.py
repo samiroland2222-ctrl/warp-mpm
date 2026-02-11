@@ -168,6 +168,79 @@ def test_solver_substep_with_mixed_particles():
     assert new_positions.shape == (n_particles, 3), "Positions should still have correct shape"
 
 
+def test_pinned_particles_stay_fixed():
+    """Test that pinned particles maintain position and identity F after G2P"""
+    n_grid = 64
+    grid_lim = 1.5
+    device = "cpu"
+
+    # Create a small membrane
+    positions = []
+    for i in range(10):
+        for j in range(10):
+            x = 0.5 + i * 0.01
+            y = 0.5 + j * 0.01
+            z = 1.0
+            positions.append([x, y, z])
+    positions = np.array(positions)
+    n_particles = len(positions)
+
+    solver = MPM_Simulator_WARP(n_particles, n_grid=n_grid, grid_lim=grid_lim, device=device)
+    solver.mpm_state.particle_x = wp.array(positions, dtype=wp.vec3, device=device)
+
+    membrane_thickness = 0.002
+    particle_volume = 0.01 * 0.01 * membrane_thickness
+    volumes = np.ones(n_particles) * particle_volume
+    solver.mpm_state.particle_vol = wp.array(volumes, dtype=float, device=device)
+
+    fibers = np.tile([1.0, 0.0, 0.0], (n_particles, 1))
+    normals = np.tile([0.0, 0.0, 1.0], (n_particles, 1))
+    solver.initialize_shell_particles(range(n_particles), fibers, normals)
+
+    solver.set_parameters_dict({
+        'material': 'jelly',
+        'E': 1e6,
+        'nu': 0.4,
+        'density': 1100.0,
+        'g': [0.0, 0.0, -9.8]
+    })
+    solver.finalize_mu_lam_bulk()
+
+    # Pin center particle
+    center_point = [0.545, 0.545, 1.0]
+    pin_size = [0.01, 0.01, 0.01]
+    solver.enforce_particle_velocity_translation(
+        point=center_point, size=pin_size,
+        velocity=[0.0, 0.0, 0.0],
+        start_time=0.0, end_time=1000.0, device=device
+    )
+
+    # Run 20 steps
+    dt = 0.001
+    for step in range(20):
+        solver.p2g2p(step=step, dt=dt)
+
+    final_positions = solver.mpm_state.particle_x.numpy()
+    final_F = solver.mpm_state.particle_F.numpy()
+
+    # Check pinned particles stayed at their initial position
+    for i in range(n_particles):
+        pos = positions[i]
+        if (abs(pos[0] - center_point[0]) < pin_size[0] and
+            abs(pos[1] - center_point[1]) < pin_size[1] and
+            abs(pos[2] - center_point[2]) < pin_size[2]):
+            dist = np.linalg.norm(final_positions[i] - pos)
+            assert dist < 1e-6, f"Pinned particle {i} moved by {dist}"
+            # F should remain identity for pinned particles (post-G2P resets F_trial = F)
+            F_err = np.linalg.norm(final_F[i] - np.eye(3))
+            assert F_err < 1e-6, f"Pinned particle {i} has F deviation {F_err}"
+
+    # Check non-pinned particles have moved (cloth drapes under gravity)
+    z_values = final_positions[:, 2]
+    z_min = z_values.min()
+    assert z_min < 1.0, f"Non-pinned particles should have fallen, z_min={z_min}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 

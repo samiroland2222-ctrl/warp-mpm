@@ -155,6 +155,9 @@ class MPM_Simulator_WARP:
         self.particle_velocity_modifiers = []
         self.particle_velocity_modifier_params = []
 
+        self.post_g2p_operations = []
+        self.post_g2p_params = []
+
     # the h5 file should store particle initial position and volume.
     def load_from_sampling(
         self, sampling_h5, n_grid=100, grid_lim=1.0
@@ -691,6 +694,15 @@ class MPM_Simulator_WARP:
                 device=device,
             )  # x, v, C, F_trial are updated
 
+        # apply post-g2p operations (e.g., enforce pinned particle constraints)
+        for k in range(len(self.post_g2p_operations)):
+            wp.launch(
+                kernel=self.post_g2p_operations[k],
+                dim=self.n_particles,
+                inputs=[self.time, self.mpm_state, self.post_g2p_params[k]],
+                device=device,
+            )
+
         #### CFL check ####
         # particle_v = self.mpm_state.particle_v.numpy()
         # if np.max(np.abs(particle_v)) > self.mpm_model.dx / dt:
@@ -1102,6 +1114,9 @@ class MPM_Simulator_WARP:
 
         velocity_modifier_params.mask = wp.zeros(
             shape=self.n_particles, dtype=int, device=device)
+
+        # Store initial positions so pinned particles can be reset after G2P
+        velocity_modifier_params.pinned_x = wp.clone(self.mpm_state.particle_x)
         
         wp.launch(
                 kernel=selection_enforce_particle_velocity_translation,
@@ -1125,6 +1140,24 @@ class MPM_Simulator_WARP:
 
         
         self.particle_velocity_modifiers.append(modify_particle_v_before_p2g)
+
+        @wp.kernel
+        def enforce_pinned_after_g2p(time: float,
+                                     state: MPMStateStruct,
+                                     velocity_modifier_params: ParticleVelocityModifier):
+            p = wp.tid()
+            if time >= velocity_modifier_params.start_time and time < velocity_modifier_params.end_time:
+                if velocity_modifier_params.mask[p] == 1:
+                    state.particle_v[p] = velocity_modifier_params.velocity
+                    state.particle_x[p] = velocity_modifier_params.pinned_x[p]
+                    state.particle_F_trial[p] = state.particle_F[p]
+                    state.particle_C[p] = wp.mat33(
+                        0.0, 0.0, 0.0,
+                        0.0, 0.0, 0.0,
+                        0.0, 0.0, 0.0)
+
+        self.post_g2p_operations.append(enforce_pinned_after_g2p)
+        self.post_g2p_params.append(velocity_modifier_params)
 
 
     # define a cylinder with center point, half_height, radius, normal
@@ -1160,6 +1193,9 @@ class MPM_Simulator_WARP:
 
         velocity_modifier_params.mask = wp.zeros(
             shape=self.n_particles, dtype=int, device=device)
+        # pinned_x is unused for rotation (no post-G2P pinning), initialized to satisfy struct
+        velocity_modifier_params.pinned_x = wp.zeros(
+            shape=self.n_particles, dtype=wp.vec3, device=device)
         
         wp.launch(
                 kernel=selection_enforce_particle_velocity_cylinder,
